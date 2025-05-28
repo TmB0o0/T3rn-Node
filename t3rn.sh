@@ -34,140 +34,95 @@ for line in "${lines[@]}"; do
   sleep 0.05
 done
 
-# Main menu
+NODE_DIR="$HOME/t3rn"
+
+function install_node() {
+  echo -e "${CYAN}Updating and upgrading system...${RESET}"
+  sudo apt update && sudo apt upgrade -y
+
+  echo -e "${CYAN}Creating t3rn directory...${RESET}"
+  mkdir -p "$NODE_DIR"
+  cd "$NODE_DIR" || exit
+
+  echo -e "${CYAN}Downloading latest t3rn executor release...${RESET}"
+  LATEST_TAG=$(curl -s https://api.github.com/repos/t3rn/executor-release/releases/latest | grep -Po '"tag_name": "\K.*?(?=")')
+  wget "https://github.com/t3rn/executor-release/releases/download/${LATEST_TAG}/executor-linux-${LATEST_TAG}.tar.gz"
+
+  echo -e "${CYAN}Extracting archive...${RESET}"
+  tar -xzf executor-linux-*.tar.gz
+
+  echo -e "${CYAN}Setting environment variables...${RESET}"
+  cd executor/executor/bin || exit
+
+  read -rsp "Enter your wallet PRIVATE KEY: " PRIVATE_KEY
+  echo
+
+  export ENVIRONMENT=testnet
+  export LOG_LEVEL=debug
+  export LOG_PRETTY=false
+  export EXECUTOR_PROCESS_BIDS_ENABLED=true
+  export EXECUTOR_PROCESS_ORDERS_ENABLED=true
+  export EXECUTOR_PROCESS_CLAIMS_ENABLED=true
+  export EXECUTOR_PROCESS_ORDERS=true
+  export EXECUTOR_PROCESS_CLAIMS=true
+  export EXECUTOR_MAX_L3_GAS_PRICE=100
+  export PRIVATE_KEY_LOCAL="$PRIVATE_KEY"
+  export EXECUTOR_ENABLED_NETWORKS='arbitrum-sepolia,base-sepolia,optimism-sepolia,l2rn'
+  export EXECUTOR_ENABLED_ASSETS="eth,t3eth,t3mon,t3sei,mon,sei"
+  export RPC_ENDPOINTS='{
+    "l2rn": ["https://t3rn-b2n.blockpi.network/v1/rpc/public", "https://b2n.rpc.caldera.xyz/http"],
+    "arbt": ["https://arbitrum-sepolia.drpc.org", "https://sepolia-rollup.arbitrum.io/rpc"],
+    "bast": ["https://base-sepolia-rpc.publicnode.com", "https://base-sepolia.drpc.org"],
+    "blst": ["https://sepolia.blast.io", "https://blast-sepolia.drpc.org"],
+    "mont": ["https://testnet-rpc.monad.xyz"],
+    "opst": ["https://sepolia.optimism.io", "https://optimism-sepolia.drpc.org"],
+    "unit": ["https://unichain-sepolia.drpc.org", "https://sepolia.unichain.org"]
+  }'
+
+  echo -e "${CYAN}Installing screen...${RESET}"
+  sudo apt-get install -y screen
+
+  echo -e "${GREEN}Installation complete.${RESET}"
+  echo "To start the node, use the menu option 'Start Node'."
+}
+
+function start_node() {
+  cd "$NODE_DIR/executor/executor/bin" || { echo -e "${RED}Node directory not found. Please install first.${RESET}"; return; }
+  screen -dmS t3rn ./executor
+  echo -e "${GREEN}Node started inside screen session named 't3rn'.${RESET}"
+}
+
+function view_logs() {
+  screen -r t3rn || echo -e "${YELLOW}No screen session named 't3rn' found.${RESET}"
+}
+
+function remove_node() {
+  echo -e "${YELLOW}Stopping node if running...${RESET}"
+  screen -S t3rn -X quit 2>/dev/null
+  echo -e "${YELLOW}Removing t3rn directory...${RESET}"
+  rm -rf "$NODE_DIR"
+  echo -e "${GREEN}Node removed.${RESET}"
+}
+
 while true; do
     echo -e "\n${WHITE}╔════════════════════════════════════════════╗${RESET}"
     echo -e "${WHITE}║            PIPE MANAGEMENT MENU            ║${RESET}"
     echo -e "${WHITE}╚════════════════════════════════════════════╝${RESET}"
-
-    if [ -f ~/pipe/pop ]; then
-        pop_version=$(~/pipe/pop --version 2>/dev/null)
-        echo -e "${GREEN}Current pop version:${RESET} $pop_version"
-    else
-        echo -e "${RED}pop not installed.${RESET}"
-    fi
-
-    echo -e "\n${CYAN}1.${RESET} 🛠️  Install Node"
-    echo -e "${CYAN}2.${RESET} 🔗 Check Status"
-    echo -e "${CYAN}3.${RESET} ⏫ Update Node"
-    echo -e "${CYAN}4.${RESET} 🧹 Remove Node"
-    echo -e "${CYAN}5.${RESET} 📜 View Logs (screen attach)"
-    echo -e "${CYAN}6.${RESET} ❌ Exit"
-    echo -ne "\n${YELLOW}Choose an option:${RESET} "
-    read choice
-
+    echo -e "1) Install Node"
+    echo -e "2) Start Node"
+    echo -e "3) View Logs"
+    echo -e "4) Remove Node"
+    echo -e "5) Exit"
+    read -rp "Choose an option [1-5]: " choice
     case $choice in
-        1)
-            echo -e "${YELLOW}--- Installing packages ---${RESET}"
-            sudo apt update
-            sudo apt install curl iptables build-essential git wget lz4 jq make gcc nano automake autoconf tmux htop nvme-cli pkg-config libssl-dev libleveldb-dev tar clang bsdmainutils ncdu unzip libleveldb-dev -y
-            
-            echo -e "${YELLOW}--- Checking for screen ---${RESET}"
-            if ! dpkg -s screen >/dev/null 2>&1; then
-                sudo apt install screen -y
-            else
-                echo -e "${GREEN}Screen already installed, skipping.${RESET}"
-            fi
-
-            echo -e "${YELLOW}--- Downloading pop ---${RESET}"
-            mkdir -p ~/pipe
-            cd ~/pipe
-            if ! wget https://dl.pipecdn.app/v0.2.8/pop -O pop; then
-                echo -e "${RED}Failed to download pop file. Exiting.${RESET}"
-                exit 1
-            fi
-
-            echo -e "${YELLOW}--- Making pop executable ---${RESET}"
-            chmod +x pop
-
-            echo -e "${YELLOW}--- Creating cache directory ---${RESET}"
-            mkdir -p ~/pipe/download_cache
-
-            echo -e "${YELLOW}--- Enter your Solana public key ---${RESET}"
-            read -p "Enter your SOLANA_PUBLIC_KEY: " solana_key
-
-            echo -e "${YELLOW}--- Launching in screen (pipe) with logging ---${RESET}"
-            screen -dmS pipe bash -c "cd ~/pipe && ./pop --ram 8 --max-disk 150 --cache-dir ~/pipe/download_cache --pubKey $solana_key | tee ~/pipe/pipe.log"
-
-            echo -e "${GREEN}Installation and launch completed.${RESET}"
-            ;;
-
-        2)
-            echo -e "${YELLOW}--- Checking status ---${RESET}"
-            if [ -f ~/pipe/pop ]; then
-                cd ~/pipe
-                ./pop --status
-            else
-                echo -e "${RED}pop file not found. Please run installation first.${RESET}"
-            fi
-            ;;
-
-        3)
-            echo -e "${YELLOW}--- Updating node ---${RESET}"
-            read -rp "🔗 Insert a link to the new version of the pop: " DOWNLOAD_URL
-            if [ -z "$DOWNLOAD_URL" ]; then
-              echo -e "${RED}❌ No link provided. Exiting...${RESET}"
-              continue
-            fi
-            POP_BIN_DIR="/opt/pop"
-            WORK_DIR="/var/lib/pop"
-            POP_BIN="$POP_BIN_DIR/pop"
-
-            echo "📦 Downloading pop from $DOWNLOAD_URL..."
-            curl -L -o pop "$DOWNLOAD_URL" || { echo -e "${RED}❌ Error downloading${RESET}"; continue; }
-
-            echo "🔧 Making pop executable..."
-            chmod +x ./pop
-
-            echo "📁 Moving pop to $POP_BIN_DIR..."
-            sudo mkdir -p "$POP_BIN_DIR"
-            sudo mv ./pop "$POP_BIN"
-
-            echo "🔐 Setting capability for ports 80/443..."
-            sudo setcap 'cap_net_bind_service=+ep' "$POP_BIN"
-
-            echo "📂 Checking working directory: $WORK_DIR"
-            sudo mkdir -p "$WORK_DIR"
-            cd "$WORK_DIR" || { echo "❌ Unable to change directory"; continue; }
-
-            echo "🔄 Running pop --refresh..."
-            "$POP_BIN" --refresh
-
-            echo -e "${GREEN}✅ Done! Update completed.${RESET}"
-            ;;
-
-        4)
-            echo -e "${YELLOW}--- Removing node folders ---${RESET}"
-            rm -rf ~/pipe
-            echo -e "${GREEN}~/pipe folder removed.${RESET}"
-            ;;
-
-        5)
-            echo -e "${YELLOW}--- Attaching to screen 'pipe' ---${RESET}"
-            if screen -list | grep -q "pipe"; then
-                echo -e "${GREEN}Press Ctrl+A, then D to detach and return here.${RESET}"
-                sleep 2
-                screen -r pipe
-            else
-                echo -e "${RED}Screen session 'pipe' not found. Make sure the node is running.${RESET}"
-            fi
-            ;;
-
-        6)
-            echo -e "${GREEN}Exiting script. Goodbye!${RESET}"
-            break
-            ;;
-
-        *)
-            echo -e "${RED}Invalid choice. Please select 1-6.${RESET}"
-            ;;
+        1) install_node ;;
+        2) start_node ;;
+        3) view_logs ;;
+        4) remove_node ;;
+        5) echo "Exiting..."; exit 0 ;;
+        *) echo -e "${RED}Invalid option.${RESET}"; sleep 1 ;;
     esac
-
-    echo ""
-    read -p "Press Enter to return to menu..."
-    clear
-
-    for line in "${lines[@]}"; do
-      echo -e "$line"
-    done
+    echo -e "\nPress Enter to return to menu..."
+    read -r
 done
+
